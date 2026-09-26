@@ -16,5 +16,8 @@
         "tabWidth": 4,
         "printWidth": 9999,
         "semi": true
+    },
+    "dependencies": {
+        "three": "^0.186.1"
     }
 }

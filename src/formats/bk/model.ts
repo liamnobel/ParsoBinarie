@@ -1,10 +1,11 @@
 import type { Method, StructuredNode } from "../../core/types.js";
-import { methodDisplayListContainer } from "./fast3dex.js";
-import { ParseContext, parseDataInternal, WriteContext, writeDataInternal, WriteState, getNodeAtPath } from "../../core/data.js";
+import { ParseContext } from "../../core/data.js";
 import { ByteReader } from "../../core/byteReader.js";
+
 import { parseGeoLayout, writeGeoLayout } from "./geoLayout.js";
+import { methodDisplayListContainer } from "./fast3dex.js";
+import { methodTextureHeaderCount } from "./texture.js";
 import * as unk14 from "./unk14.js";
-import { ByteWriter } from "../../core/byteWriter.js";
 
 const methodCollisionSetup: Method = {
     type: "struct",
@@ -99,99 +100,6 @@ const methodVertexList: Method = {
         count: "u16",
         global_norm: "s16",
         vertices: vertexDataElement,
-    },
-};
-
-// export const  methodTextureData: Method = {
-//     type: "texture",
-//     textureTypeField: "textureType",
-//     textureWidthField: "pixelGridX",
-//     textureHeightField: "pixelGridY",
-// };
-
-export const methodTextureDataBlob: Method = {
-    type: "custom",
-    read: (reader: ByteReader, parseContext: ParseContext): StructuredNode => {
-        const offsetBefore = reader.offset;
-        const byteLength = getNodeAtPath("byteLength", parseContext) as number;
-        const textureCount = getNodeAtPath("textureCount", parseContext) as number;
-
-        const source: Uint8Array = new Uint8Array(reader.view.buffer);
-
-        const headerDataMethod: Method = {
-            type: "arrayFieldLength",
-            element: methodTextureHeader,
-            lengthField: "textureCount",
-        };
-
-        const headerData = parseDataInternal(source, reader, headerDataMethod, parseContext, { deferred: [] });
-
-        const textureDataMethod: Method = {
-            type: "arrayFixedLength",
-            element: "u8",
-            length: byteLength - textureCount * 16 - 8,
-        };
-
-        const textureData = parseDataInternal(source, reader, textureDataMethod, parseContext, { deferred: [] });
-
-        return {
-            type: "custom",
-            data: {
-                headerDataMethod,
-                headerData,
-                textureDataMethod,
-                textureData,
-            },
-            _byteLower: offsetBefore,
-            _byteUpper: reader.offset,
-        };
-    },
-    write: (writer: ByteWriter, node: StructuredNode, writeContext: WriteContext, writeState: WriteState): void => {
-        writeDataInternal(node.data.headerData, writer, node.data.headerDataMethod, writeContext, writeState);
-        writeDataInternal(node.data.textureData, writer, node.data.textureDataMethod, writeContext, writeState);
-    },
-};
-
-export const methodTextureHeader: Method = {
-    type: "struct",
-    fields: {
-        // textureData: {
-        //     type: "offset",
-        //     offsetType: "u32",
-        //     targetMethod: methodTextureDataBlob,
-        //     offsetAlignment: "endOf",
-        //     offsetFrom: "../textureHeaders",
-        // },
-        offset: "u32",
-        textureType: "u16",
-        unknown6: "u8",
-        unknown7: "u8",
-        pixelGridX: "u8",
-        pixelGridY: "u8",
-        unknownA: "u8",
-        unknownB: "u8",
-        unknownC: "u8",
-        unknownD: "u8",
-        unknownE: "u8",
-        unknownF: "u8",
-    },
-};
-
-export const methodTextureHeaderCount: Method = {
-    type: "struct",
-    fields: {
-        byteLength: "u32", // note this includes the headers as well
-        textureCount: "u16",
-
-        unknown0: "u16",
-
-        // textureHeaders: {
-        //     type: "arrayFieldLength",
-        //     element: methodTextureHeader,
-        //     lengthField: "textureCount",
-        // },
-
-        textureData: methodTextureDataBlob,
     },
 };
 

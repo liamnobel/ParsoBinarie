@@ -1,7 +1,9 @@
 import "./style.css";
 
 import * as ParsoBinarie from "../../../src/index.js";
-import modelBin from "../../../binaries/model/input.model.bin?url";
+
+// import modelBin from "../../../binaries/model/04C6.model.bin?url";
+import modelBin from "../../../binaries/model/03E2.model.bin?url";
 
 const MODIFY = false; // set to false to skip modification and just compare original and round-trip data
 
@@ -53,7 +55,7 @@ function renderJson(data: any, depth = 0) {
 
     const entries = isArray
         ? // @ts-expect-error
-        Array.from(data).map((value, index) => [index, value])
+          Array.from(data).map((value, index) => [index, value])
         : Object.entries(data);
 
     const details = document.createElement("details");
@@ -234,26 +236,34 @@ for (let index = 0; index < maxLength; index++) {
     divLeft.appendChild(spanL);
     divRight.appendChild(spanR);
 
-    if (!MODIFY) {
-        if (originalByte !== roundTripByte) {
-            spanL.style.backgroundColor = "#770000";
-            spanR.style.backgroundColor = "#AA0000";
-            isMatching = false;
-        }
-    } else {
-        if (originalByte !== roundTripByte) {
-            spanL.style.backgroundColor = "#657700";
-            spanR.style.backgroundColor = "#65AA00";
-            isMatching = false;
-        }
-    }
-
     const tag = parsedData.debugTaggedOffsets[index];
     if (tag) {
         spanL.style.backgroundColor = tag.color;
         spanR.style.backgroundColor = tag.color;
         spanL.title = tag.text;
         spanR.title = tag.text;
+    }
+
+    if (!MODIFY) {
+        if (originalByte !== roundTripByte) {
+            spanL.style.backgroundColor = "#770000";
+            spanR.style.backgroundColor = "#AA0000";
+            if (tag) {
+                spanL.style.outline = "2px solid " + tag.color;
+                spanR.style.outline = "2px solid " + tag.color;
+            }
+            isMatching = false;
+        }
+    } else {
+        if (originalByte !== roundTripByte) {
+            spanL.style.backgroundColor = "#657700";
+            spanR.style.backgroundColor = "#65AA00";
+            if (tag) {
+                spanL.style.outline = "2px solid " + tag.color;
+                spanR.style.outline = "2px solid " + tag.color;
+            }
+            isMatching = false;
+        }
     }
 }
 
@@ -262,7 +272,9 @@ if (!MODIFY) {
     if (isMatching) {
         console.log("Success: The original and round-trip data match!");
         body.style.backgroundColor = "#00aa00";
+        document.title = "PB: RT Success! ✅";
     } else {
         body.style.backgroundColor = "#aa0000";
+        document.title = "PB: RT Failure! ❌";
     }
 }

@@ -16,6 +16,7 @@ const files = await readdir(modelBinDirectory);
 
 type TestResult = {
     fileName: string;
+    originalFileSize: number;
     result: Awaited<ReturnType<typeof roundTripTest>>;
 };
 
@@ -49,6 +50,7 @@ async function testFile(file: string): Promise<TestResult> {
 
     return {
         fileName: file,
+        originalFileSize: binaryModel.length,
         result,
     };
 }
@@ -78,6 +80,7 @@ async function worker(): Promise<void> {
 
             results[fileIndex] = {
                 fileName: file,
+                originalFileSize: 0,
                 result: {
                     success: false,
                     message: error instanceof Error ? error.message : String(error),
@@ -99,11 +102,11 @@ await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
 process.stdout.write("\n\n");
 
-for (const { fileName, result } of results) {
+for (const { fileName, originalFileSize, result } of results) {
     if (result.success) {
         // console.log(`${consoleColorCommands.green}${fileName}: Equal${consoleColorCommands.reset}`);
     } else {
-        console.log(`${consoleColorCommands.red}${fileName}: Not Equal (${result.message})${consoleColorCommands.reset}`);
+        console.log(`${consoleColorCommands.red}${fileName}: Not Equal (${result.message})${consoleColorCommands.reset}   size: ${originalFileSize}`);
     }
 }
 

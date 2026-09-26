@@ -21,7 +21,7 @@ export enum GeoTypeFlags {
     BK_GEO_TYPE_ENV_MAP_BIT = 0x04,
 }
 
-export type TextureType = "CI4" | "CI8" | "IA4" | "IA8" | "I4" | "I8" | "RGBA16" | "RGBA32";
+// export type TextureType = "CI4" | "CI8" | "IA4" | "IA8" | "I4" | "I8" | "RGBA16" | "RGBA32";
 
 export type MethodOffset = {
     type: "offset";
@@ -47,31 +47,31 @@ export type MethodArrayFixedLength = {
 export type Method =
     | PrimitiveType
     | {
-        type: "bytes";
-        bytes: number;
-    }
+          type: "bytes";
+          bytes: number;
+      }
     | {
-        type: "struct";
-        fields: { [key: string]: Method };
-    }
+          type: "struct";
+          fields: { [key: string]: Method };
+      }
     | MethodOffset
     | MethodArrayFixedLength
     | {
-        type: "arrayFieldLength";
-        element: Method;
-        lengthField: string;
-    }
+          type: "arrayFieldLength";
+          element: Method;
+          lengthField: string;
+      }
     | {
-        type: "texture";
-        textureTypeField: string;
-        textureWidthField: string;
-        textureHeightField: string;
-    }
+          type: "texture";
+          textureTypeField: string;
+          textureWidthField: string;
+          textureHeightField: string;
+      }
     | {
-        type: "custom";
-        read: (reader: ByteReader, parseContext: ParseContext) => StructuredNode;
-        write: (writer: ByteWriter, node: StructuredNode, writeContext: WriteContext, state: WriteState) => void;
-    };
+          type: "custom";
+          read: (reader: ByteReader, parseContext: ParseContext) => StructuredNode;
+          write: (writer: ByteWriter, node: StructuredNode, writeContext: WriteContext, state: WriteState) => void;
+      };
 
 export type ComplexMethod = Exclude<Method, PrimitiveType>;
 
@@ -85,22 +85,22 @@ export type StructuredNode =
     | { [key: string]: StructuredNode }
     | StructuredNode[]
     | {
-        type: ComplexType;
-        data: StructuredNode | StructuredNode[] | { [key: string]: StructuredNode } | null;
-        _byteLower: number;
-        _byteUpper: number;
-    }
+          type: ComplexType;
+          data: StructuredNode | StructuredNode[] | { [key: string]: StructuredNode } | null;
+          _byteLower: number;
+          _byteUpper: number;
+      }
     | {
-        type: "texture";
-        textureType: TextureTypeEnum;
-        textureWidth: number;
-        textureHeight: number;
-        texturePalette?: Uint8Array;
-        textureData: Uint8Array;
-        textureMipMapTrilinear?: boolean;
-        padBytes?: Uint8Array;
-    }
+          type: "texture";
+          textureType: TextureTypeEnum;
+          textureWidth: number;
+          textureHeight: number;
+          texturePalette?: Uint8Array;
+          textureData: Uint8Array;
+          textureMipMapTrilinear?: boolean;
+          padBytes?: Uint8Array;
+      }
     | {
-        type: "custom";
-        data: StructuredNode;
-    };
+          type: "custom";
+          data: StructuredNode;
+      };
