@@ -90,6 +90,35 @@ export class ByteWriter {
         this.offset += 8;
     }
 
+    bitField(fields: Record<string, number>, entries: Record<string, number>): void {
+        let bits = 0;
+        let bitsLoaded = 0;
+
+        for (const [field, bitsRequired] of Object.entries(fields)) {
+            const value = entries[field];
+
+            if (!Number.isInteger(value) || value < 0 || value >= 2 ** bitsRequired) {
+                throw new Error(`Invalid value for ${field}`);
+            }
+
+            bits = (bits << bitsRequired) | value;
+            bitsLoaded += bitsRequired;
+
+            while (bitsLoaded >= 8) {
+                bitsLoaded -= 8;
+
+                this.u8((bits >>> bitsLoaded) & 0xff);
+
+                // Retain only unwritten bits.
+                bits &= (1 << bitsLoaded) - 1;
+            }
+        }
+
+        if (bitsLoaded !== 0) {
+            throw new Error("Bit fields are not byte-aligned");
+        }
+    }
+
     writeBytes(bytes: Uint8Array) {
         this.ensureCapacity(bytes.length);
 

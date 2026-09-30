@@ -14,7 +14,7 @@
     },
     "prettier": {
         "tabWidth": 4,
-        "printWidth": 9999,
+        "printWidth": 240,
         "semi": true
     },
     "dependencies": {

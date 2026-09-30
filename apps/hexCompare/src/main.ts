@@ -2,8 +2,8 @@ import "./style.css";
 
 import * as ParsoBinarie from "../../../src/index.js";
 
-// import modelBin from "../../../binaries/model/04C6.model.bin?url";
-import modelBin from "../../../binaries/model/03E2.model.bin?url";
+// import modelBin from "../../../binaries/model/02DF.model.bin?url";
+import modelBin from "../../../binaries/model/02E6.model.bin?url";
 
 const MODIFY = false; // set to false to skip modification and just compare original and round-trip data
 

@@ -294,10 +294,15 @@ function numberColorToCSSColor(color: number) {
 }
 
 function debugAttachTextureToDocument(texType: TextureTypeEnum, palette: number[], w: number, h: number, textureData: Uint8Array): void {
+    // skip if running in bun and not browser
+    if (typeof document === "undefined") {
+        return;
+    }
+
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;
-    canvas.title = `Texture: ${texType}`;
+    canvas.title = `Texture: ${TextureTypeEnum[texType]} (${w}x${h})`;
     canvas.style.padding = "4px";
 
     let ctx = canvas.getContext("2d");

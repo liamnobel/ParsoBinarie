@@ -76,6 +76,12 @@ type displayListVtxData = {
     segmentOffset: number;
 };
 
+type displayListTri1Data = {
+    command: "G_TRI1";
+    padding: [number, number, number, number];
+    triA: [number, number, number];
+};
+
 type displayListTri2Data = {
     command: "G_TRI2";
     padding: [number];
@@ -83,18 +89,137 @@ type displayListTri2Data = {
     triB: [number, number, number];
 };
 
-type displayListTri1Data = {
-    command: "G_TRI1";
-    padding: [number, number, number, number];
-    triA: [number, number, number];
+type displayListTextureData = {
+    command: "G_TEXTURE";
+    unknownByte: number;
+    unknownBits: number;
+    mipmaps: number;
+    tile: number;
+    tileEnable: number;
+    scaleS: number;
+    scaleT: number;
 };
 
+type displayListSetTimgData = {
+    command: "G_SETTIMG";
+    textureFormat: number;
+    textureBitSize: number;
+    unknownBits: number;
+    unknown: number;
+    segment: number;
+};
+
+type BitField = Record<string, number>;
+
+const bitFieldsSetTile: BitField = {
+    colorFormat: 3,
+    bitCalcPower: 2, // bits per pixel = 4*2^(bitCalcPower)
+    padBit: 1,
+    numberOf64BitValuesPerRow: 9,
+    tmemOffset: 9,
+    padBits: 5,
+    tile: 3,
+    palette: 4,
+    tClampAndMirror: 2,
+    tWrapBits: 4,
+    tShiftBits: 4,
+    sClampAndMirror: 2,
+    sWrapBits: 4,
+    sShiftBits: 4,
+};
+
+const bitFieldsSetTileSize: BitField = {
+    sLower: 12,
+    tLower: 12,
+    pad: 4,
+    tile: 4,
+    sWidth: 12,
+    tWidth: 12,
+};
+
+const bitFieldsLoadBlock: BitField = {
+    sLower: 12,
+    tLower: 12,
+    pad: 4,
+    tile: 4,
+    texelCount: 12,
+    dxt: 12,
+};
+
+type displayListSetTileData = {
+    command: "G_SETTILE";
+    colorFormat: number;
+    bitsPerPixel: number;
+    padBit: number;
+    numberOf64BitValuesPerRow: number;
+    tmemOffset: number;
+    padBits: number;
+    tile: number;
+    palette: number;
+    tClampAndMirror: number;
+    tWrapBits: number;
+    tShiftBits: number;
+    sClampAndMirror: number;
+    sWrapBits: number;
+    sShiftBits: number;
+};
+
+type displayListSetTileSizeData = {
+    command: "G_SETTILESIZE";
+    sLower: number;
+    tLower: number;
+    pad: number;
+    tile: number;
+    sWidth: number;
+    tWidth: number;
+};
+
+type displayListLoadBlockData = {
+    command: "G_LOADBLOCK";
+    sLower: number;
+    tLower: number;
+    pad: number;
+    tile: number;
+    texelCount: number;
+    dxt: number;
+};
+
+type displayListLoadTLUTData = {
+    command: "G_LOADTLUT";
+    byte0: number;
+    byte1: number;
+    byte2: number;
+    u8: number;
+    tile: number;
+    u16: number;
+    colorCount: number;
+    byte3: number;
+};
+
+const bitFieldsLoadTLUT: BitField = {
+    padding0: 29,
+    tile: 3,
+    colorCount: 12,
+    padding1: 12,
+}
+
 type displayListDefaultData = {
-    command: Exclude<keyof typeof DisplayCommand, "G_MOVEMEM" | "G_VTX" | "G_TRI1" | "G_TRI2">;
+    command: Exclude<keyof typeof DisplayCommand, "G_MOVEMEM" | "G_VTX" | "G_TRI1" | "G_TRI2" | "G_TEXTURE" | "G_SETTIMG" | "G_SETTILE" | "G_SETTILESIZE" | "G_LOADBLOCK" | "G_LOADTLUT">;
     bytes: [number, number, number, number, number, number, number];
 };
 
-type DisplayListData = displayListMoveMemData | displayListVtxData | displayListTri1Data | displayListTri2Data | displayListDefaultData;
+export type DisplayListData =
+    | displayListMoveMemData
+    | displayListVtxData
+    | displayListTri1Data
+    | displayListTri2Data
+    | displayListTextureData
+    | displayListSetTimgData
+    | displayListSetTileData
+    | displayListSetTileSizeData
+    | displayListLoadBlockData
+    | displayListLoadTLUTData
+    | displayListDefaultData;
 
 const displayCommandRead = (reader: ByteReader, parentContext: ParseContext): DisplayListData => {
     const commandByte = reader.u8();
@@ -184,6 +309,96 @@ const displayCommandRead = (reader: ByteReader, parentContext: ParseContext): Di
             };
         }
 
+        case "G_SETTIMG": {
+            const u8 = reader.u8();
+            const textureFormat = (u8 & 0b1110_0000) >> 5;
+            const textureBitSize = (u8 & 0b0001_1000) >> 3;
+            const unknownBits = (u8 & 0b0000_0111) >> 0;
+
+            const unknown = reader.u16();
+
+            const segment = reader.u32();
+
+            return {
+                command,
+                textureFormat,
+                textureBitSize,
+                unknownBits,
+                unknown,
+                segment,
+            };
+        }
+
+        case "G_TEXTURE": {
+            const unknownByte = reader.u8();
+
+            const u8 = reader.u8();
+            const unknownBits = (u8 & 0b1100_0000) >> 6;
+            const mipmaps = (u8 & 0b0011_1000) >> 3;
+            const tile = u8 & 0b0000_0111;
+
+            const tileEnable = reader.u8();
+
+            const scaleS = reader.u16();
+            const scaleT = reader.u16();
+
+            return {
+                command,
+                unknownByte,
+                unknownBits,
+                mipmaps,
+                tile,
+                tileEnable,
+                scaleS,
+                scaleT,
+            };
+        }
+
+        case "G_SETTILE": {
+            const entries = reader.bitField(bitFieldsSetTile);
+            // @ts-expect-error
+            return {
+                command,
+                ...entries,
+            };
+        }
+
+        case "G_SETTILESIZE": {
+            const entries = reader.bitField(bitFieldsSetTileSize);
+
+            entries.sWidth = (entries.sWidth >> 2) + 1;
+            entries.tWidth = (entries.tWidth >> 2) + 1;
+
+            // @ts-expect-error
+            return {
+                command,
+                ...entries,
+            };
+        }
+
+        case "G_LOADBLOCK": {
+            const entries = reader.bitField(bitFieldsLoadBlock);
+            entries.texelCount += 1;
+            // @ts-expect-error
+            return {
+                command,
+                ...entries,
+            };
+        }
+
+        case "G_LOADTLUT": {
+            const entries = reader.bitField(bitFieldsLoadTLUT);
+
+            entries.colorCount /= 4;
+            entries.colorCount += 1;
+
+            // @ts-expect-error
+            return {
+                command,
+                ...entries,
+            };
+        }
+
         default: {
             const byte0 = reader.u8();
             const byte1 = reader.u8();
@@ -251,6 +466,56 @@ const displayCommandWrite = (writer: ByteWriter, node: StructuredNode, parentCon
             for (let i = 0; i < 3; i++) {
                 writer.u8(command.triB[i] << 1);
             }
+            break;
+        }
+
+        case "G_TEXTURE": {
+            writer.u8(command.unknownByte);
+
+            const u8 = (command.unknownBits << 6) | (command.mipmaps << 3) | (command.tile << 0);
+            writer.u8(u8);
+
+            writer.u8(command.tileEnable);
+
+            writer.u16(command.scaleS);
+            writer.u16(command.scaleT);
+            break;
+        }
+
+        case "G_SETTIMG": {
+            writer.u8((command.textureFormat << 5) | (command.textureBitSize << 3) | (command.unknownBits << 0));
+            writer.u16(command.unknown);
+            writer.u32(command.segment);
+            break;
+        }
+
+        case "G_SETTILE": {
+            // @ts-expect-error
+            writer.bitField(bitFieldsSetTile, command);
+            break;
+        }
+
+        case "G_SETTILESIZE": {
+            command.sWidth = (command.sWidth - 1) << 2;
+            command.tWidth = (command.tWidth - 1) << 2;
+            // @ts-expect-error
+            writer.bitField(bitFieldsSetTileSize, command);
+            break;
+        }
+
+        case "G_LOADBLOCK": {
+            command.texelCount -= 1;
+            // @ts-expect-error
+            writer.bitField(bitFieldsLoadBlock, command);
+            break;
+        }
+
+        case "G_LOADTLUT": {
+            command.colorCount -= 1;
+            command.colorCount *= 4;
+
+            // @ts-expect-error
+            writer.bitField(bitFieldsLoadTLUT, command);
             break;
         }
 

@@ -63,6 +63,29 @@ export class ByteReader {
         return value;
     }
 
+    public bitField(fields: Record<string, number>): Record<string, number> {
+        const entries: Record<string, number> = {};
+
+        let bits = 0;
+        let bitsLoaded = 0;
+
+        for (const [field, bitsRequired] of Object.entries(fields)) {
+            while (bitsLoaded < bitsRequired) {
+                bits = (bits << 8) | this.u8();
+                bitsLoaded += 8;
+            }
+
+            bitsLoaded -= bitsRequired;
+
+            entries[field] = (bits >>> bitsLoaded) & ((1 << bitsRequired) - 1);
+
+            // Retain only unread bits.
+            bits &= (1 << bitsLoaded) - 1;
+        }
+
+        return entries;
+    }
+
     tagOffset(color: string, text: string): void {
         this.debugTaggedOffsets[this.offset] = {
             color: color,
