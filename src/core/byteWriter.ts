@@ -1,4 +1,4 @@
-import type { Endian } from "./types.js";
+import type { BitFieldData, Endian } from "./types.js";
 
 export class ByteWriter {
     private readonly littleEndian: boolean;
@@ -90,7 +90,7 @@ export class ByteWriter {
         this.offset += 8;
     }
 
-    bitField(fields: Record<string, number>, entries: Record<string, number>): void {
+    bitField<T extends Record<string, number>>(fields: T, entries: BitFieldData<T>): void {
         let bits = 0;
         let bitsLoaded = 0;
 

@@ -1,5 +1,4 @@
-import type { StructuredNode, Method, IntegerType, MethodOffset } from "./types.js";
-import { GeoTypeFlags, TextureTypeEnum } from "./types.js";
+import { StructuredNode, Method, IntegerType, MethodOffset, isComplexNode } from "./types.js";
 import { ByteReader } from "./byteReader.js";
 import { ByteWriter } from "./byteWriter.js";
 
@@ -45,30 +44,49 @@ export type WriteState = {
 export function getNodeAtPath(path: string, context: ParseContext): StructuredNode {
     const parts = path.split("/");
     let targetContext = context;
+
     while (parts[0] === "..") {
         if (!targetContext.parent) {
-            throw new Error(`Cannot resolve field path "${path}": ` + `no parent context exists.`);
+            throw new Error(`Cannot resolve field path "${path}": no parent context exists.`);
         }
+
         targetContext = targetContext.parent;
         parts.shift();
     }
-    if (targetContext.node === undefined || targetContext.node === null) {
-        throw new Error(`Cannot resolve field path "${path}": ` + `current context has no node.`);
+
+    let value = targetContext.node;
+
+    if (value === undefined || value === null) {
+        throw new Error(`Cannot resolve field path "${path}": current context has no node.`);
     }
-    let value: StructuredNode = targetContext.node;
+
     for (const part of parts) {
         if (part === "" || part === ".") {
             continue;
         }
-        if (typeof value !== "object" || value === null || (value.type !== "struct" && value.type !== "offset")) {
-            throw new Error(`Cannot resolve field path "${path}": ` + `expected a struct at "${part}".`);
+
+        // Follow offsets to their target node.
+        while (isComplexNode(value) && value.type === "offset") {
+            if (value.data === null) {
+                throw new Error(`Cannot resolve field path "${path}": encountered null offset.`);
+            }
+
+            value = value.data;
         }
-        const next = value.data[part];
-        if (next === undefined || next === null) {
-            throw new Error(`Cannot resolve field path "${path}": ` + `field "${part}" does not exist. The only available fields are: ${Object.keys(value.data).join(", ")}`);
+
+        if (!isComplexNode(value) || value.type !== "struct") {
+            throw new Error(`Cannot resolve field path "${path}": expected a struct at "${part}".`);
         }
+
+        const next: StructuredNode | undefined = value.data[part];
+
+        if (next === undefined) {
+            throw new Error(`Cannot resolve field path "${path}": field "${part}" does not exist. ` + `Available fields: ${Object.keys(value.data).join(", ")}`);
+        }
+
         value = next;
     }
+
     return value;
 }
 
@@ -105,7 +123,7 @@ function canResolveDeferredWrite(item: DeferredWrite): boolean {
     try {
         const dependencyContext = getWriteContextAtPath(writeAfter, item.pathContext);
 
-        if (typeof dependencyContext.node === "object" && dependencyContext.node !== null && dependencyContext.node.type === "offset") {
+        if (isComplexNode(dependencyContext.node) && dependencyContext.node.type === "offset") {
             return dependencyContext.targetResolved === true;
         }
 
@@ -122,17 +140,18 @@ function getParsedNodeBounds(
     byteLower: number;
     byteUpper: number;
 } {
-    if (typeof node !== "object" || node === null || !("_byteLower" in node) || !("_byteUpper" in node)) {
+    if (!isComplexNode(node) || !("_byteLower" in node) || !("_byteUpper" in node)) {
         throw new Error(`Cannot use field path "${path}" as an offset origin ` + `because it has no byte bounds.`);
     }
     return { byteLower: node._byteLower, byteUpper: node._byteUpper };
 }
 
 function assertNever(value: never): never {
-    throw new Error(`Unexpected value: ${JSON.stringify(value)}`);
+    console.trace();
+    throw new Error(`Unexpected assertNever function call with value: ${JSON.stringify(value)}`);
 }
 
-export function parseDataInternal(source: Uint8Array, reader: ByteReader, method: Method, parseContext: ParseContext, state: ParseState): StructuredNode {
+export function parseDataInternal(reader: ByteReader, method: Method, parseContext: ParseContext, state: ParseState): StructuredNode {
     if (typeof method === "string") {
         switch (method) {
             case "u8":
@@ -160,7 +179,7 @@ export function parseDataInternal(source: Uint8Array, reader: ByteReader, method
         case "bytes": {
             reader.tagOffset("yellow", "bytes until 0x" + (reader.offset + method.bytes).toString(16));
 
-            const blobData = source.subarray(reader.offset, reader.offset + method.bytes);
+            const blobData = reader.buffer.slice(reader.offset, reader.offset + method.bytes);
             reader.offset += method.bytes;
             return {
                 type: "bytes",
@@ -183,7 +202,7 @@ export function parseDataInternal(source: Uint8Array, reader: ByteReader, method
                 node: nodeCurrent,
             };
             for (const [fieldName, fieldMethod] of Object.entries(method.fields)) {
-                fields[fieldName] = parseDataInternal(source, reader, fieldMethod, structContext, state);
+                fields[fieldName] = parseDataInternal(reader, fieldMethod, structContext, state);
             }
             nodeCurrent._byteUpper = reader.offset;
             return nodeCurrent;
@@ -194,7 +213,7 @@ export function parseDataInternal(source: Uint8Array, reader: ByteReader, method
                 color = "#0e550e";
             }
             reader.tagOffset(color, `offset from ${method.offsetType}`);
-            const offsetAmount = parseDataInternal(source, reader, method.offsetType, parseContext, state);
+            const offsetAmount = parseDataInternal(reader, method.offsetType, parseContext, state);
             if (typeof offsetAmount !== "number") {
                 throw new Error(`Offset did not parse to a numeric value.`);
             }
@@ -223,7 +242,7 @@ export function parseDataInternal(source: Uint8Array, reader: ByteReader, method
         case "arrayFixedLength": {
             const elements: StructuredNode[] = [];
             for (let i = 0; i < method.length; i++) {
-                elements.push(parseDataInternal(source, reader, method.element, parseContext, state));
+                elements.push(parseDataInternal(reader, method.element, parseContext, state));
             }
             return {
                 type: "arrayFixedLength",
@@ -236,83 +255,13 @@ export function parseDataInternal(source: Uint8Array, reader: ByteReader, method
             const length = getNodeAtPath(method.lengthField, parseContext) as number;
             const elements: StructuredNode[] = [];
             for (let i = 0; i < length; i++) {
-                elements.push(parseDataInternal(source, reader, method.element, parseContext, state));
+                elements.push(parseDataInternal(reader, method.element, parseContext, state));
             }
             return {
                 type: "arrayFieldLength",
                 data: elements,
                 _byteLower: offsetBefore,
                 _byteUpper: reader.offset,
-            };
-        }
-        case "texture": {
-            // to be moved out of core and into a format-specific parser
-            reader.tagOffset("orange", "texture");
-
-            const textureTypeNode = getNodeAtPath(method.textureTypeField, parseContext) as number;
-            const textureWidthNode = getNodeAtPath(method.textureWidthField, parseContext) as number;
-            const textureHeightNode = getNodeAtPath(method.textureHeightField, parseContext) as number;
-
-            const textureMipMapTrilinearNode = getNodeAtPath("../../geo_type", parseContext) as number;
-            const byteMultiple = textureMipMapTrilinearNode & GeoTypeFlags.BK_GEO_TYPE_MIPMAP_TRILINEAR_BIT ? 1.5 : 1;
-            // const byteMultiple = 1;
-
-            // console.log("TextureType", textureTypeNode);
-
-            let textureType: TextureTypeEnum;
-            let bytesPalette: number;
-            let bytesImage: number;
-            switch (textureTypeNode) {
-                case 0x01:
-                    textureType = TextureTypeEnum.CI4;
-                    bytesPalette = 16 * 2;
-                    bytesImage = (textureWidthNode * textureHeightNode) / 2;
-                    break;
-                case 0x02:
-                    textureType = TextureTypeEnum.CI8;
-                    bytesPalette = 256 * 2;
-                    bytesImage = textureWidthNode * textureHeightNode;
-                    break;
-                case 0x04:
-                    textureType = TextureTypeEnum.RGBA16;
-                    bytesPalette = 0;
-                    bytesImage = textureWidthNode * textureHeightNode * 2 * byteMultiple;
-                    break;
-                case 0x08:
-                    textureType = TextureTypeEnum.RGBA32;
-                    bytesPalette = 0;
-                    bytesImage = textureWidthNode * textureHeightNode * 4;
-                    break;
-                case 0x10:
-                    textureType = TextureTypeEnum.IA8;
-                    bytesPalette = 0;
-                    bytesImage = textureWidthNode * textureHeightNode;
-                    break;
-                default:
-                    throw new Error(`Unknown texture type: ${textureTypeNode}`);
-            }
-            const texturePalette = source.subarray(reader.offset, reader.offset + bytesPalette);
-            reader.offset += bytesPalette;
-            const image = source.subarray(reader.offset, reader.offset + bytesImage);
-            reader.offset += bytesImage;
-
-            // 64 bytes of padding(?) if y dimension is 96
-            let padBytesLength = 0;
-            if (textureHeightNode === 96) {
-                padBytesLength = 64;
-            }
-
-            const padBytes = source.subarray(reader.offset, reader.offset + padBytesLength);
-            reader.offset += padBytesLength;
-
-            return {
-                type: "texture",
-                textureType: textureType,
-                textureWidth: textureWidthNode,
-                textureHeight: textureHeightNode,
-                texturePalette: texturePalette,
-                textureData: image,
-                padBytes: padBytes,
             };
         }
         case "custom": {
@@ -323,19 +272,19 @@ export function parseDataInternal(source: Uint8Array, reader: ByteReader, method
     }
 }
 
-function parseDataLaterResolve(source: Uint8Array, reader: ByteReader, state: ParseState): void {
+function parseDataLaterResolve(reader: ByteReader, state: ParseState): void {
     while (state.deferred.length > 0) {
         const { method, parseContext, offsetAmount, destination } = state.deferred.shift()!;
         const offsetFromNode = getNodeAtPath(method.offsetFrom, parseContext);
         const bounds = getParsedNodeBounds(offsetFromNode, method.offsetFrom);
         const offsetFromValue = method.offsetAlignment === "startOf" ? bounds.byteLower : bounds.byteUpper;
         const targetOffset = offsetFromValue + offsetAmount;
-        if (!Number.isInteger(targetOffset) || targetOffset < 0 || targetOffset > source.length) {
+        if (!Number.isInteger(targetOffset) || targetOffset < 0 || targetOffset > reader.buffer.length) {
             throw new Error(`Resolved offset target ` + `0x${targetOffset.toString(16)} ` + `is outside the source buffer.`);
         }
         reader.offset = targetOffset;
         reader.tagOffset("purple", "resolved offset");
-        const targetData = parseDataInternal(source, reader, method.targetMethod, parseContext, state);
+        const targetData = parseDataInternal(reader, method.targetMethod, parseContext, state);
         (
             destination as Extract<
                 StructuredNode,
@@ -347,12 +296,12 @@ function parseDataLaterResolve(source: Uint8Array, reader: ByteReader, state: Pa
     }
 }
 
-export function parseData(source: Uint8Array, reader: ByteReader, method: Method, parseContext: ParseContext): StructuredNode {
+export function parseData(reader: ByteReader, method: Method, parseContext: ParseContext): StructuredNode {
     const state: ParseState = {
         deferred: [],
     };
-    const data = parseDataInternal(source, reader, method, parseContext, state);
-    parseDataLaterResolve(source, reader, state);
+    const data = parseDataInternal(reader, method, parseContext, state);
+    parseDataLaterResolve(reader, state);
     return data;
 }
 
@@ -364,7 +313,7 @@ export function parseDataFromArray(
     debugTaggedOffsets: Record<number, { color: string; text: string }>;
 } {
     const reader = new ByteReader(source, "big");
-    const data = parseData(source, reader, method, {
+    const data = parseData(reader, method, {
         parent: null,
     });
     return {
@@ -401,6 +350,7 @@ function writeOffsetPlaceholder(writer: ByteWriter, offsetType: IntegerType): vo
 function writeOffsetValue(writer: ByteWriter, offsetType: IntegerType, value: number): void {
     // console.log("Patching offset value: 0x" + value.toString(16) + " at offset: 0x" + writer.offset.toString(16));
     if (!Number.isInteger(value) || value < 0) {
+        console.trace();
         throw new Error(`Invalid offset value: ${value}`);
     }
     switch (offsetType) {
@@ -475,10 +425,12 @@ export function writeDataInternal(node: StructuredNode, writer: ByteWriter, meth
         node,
         byteLower: writer.offset,
     };
+
     if (typeof method === "string") {
         if (typeof node !== "number") {
             throw new Error(`Expected numeric node for ${method}.`);
         }
+
         switch (method) {
             case "u8":
                 writer.u8(node);
@@ -507,19 +459,21 @@ export function writeDataInternal(node: StructuredNode, writer: ByteWriter, meth
             default:
                 return assertNever(method);
         }
+
         context.byteUpper = writer.offset;
         return context;
     }
+
     switch (method.type) {
         case "bytes": {
-            if (typeof node !== "object" || node === null || node.type !== "bytes") {
+            if (!isComplexNode(node) || node.type !== "bytes") {
                 throw new Error(`Expected bytes node.`);
             }
             writer.writeBytes(node.data);
             break;
         }
         case "struct": {
-            if (typeof node !== "object" || node === null || node.type !== "struct") {
+            if (!isComplexNode(node) || node.type !== "struct") {
                 throw new Error(`Expected struct node.`);
             }
             context.fields = {};
@@ -533,7 +487,7 @@ export function writeDataInternal(node: StructuredNode, writer: ByteWriter, meth
             break;
         }
         case "offset": {
-            if (typeof node !== "object" || node === null || node.type !== "offset") {
+            if (!isComplexNode(node) || node.type !== "offset") {
                 throw new Error("Expected offset node.");
             }
 
@@ -544,6 +498,7 @@ export function writeDataInternal(node: StructuredNode, writer: ByteWriter, meth
                 writeOffsetValue(writer, method.offsetType, method.nullValue);
                 context.byteUpper = writer.offset;
                 context.targetResolved = true;
+
                 return context;
             }
 
@@ -558,45 +513,41 @@ export function writeDataInternal(node: StructuredNode, writer: ByteWriter, meth
                 pathContext,
                 offsetContext: context,
             });
+
             return context;
         }
         case "arrayFixedLength": {
-            if (typeof node !== "object" || node === null || node.type !== "arrayFixedLength") {
+            if (!isComplexNode(node) || node.type !== "arrayFixedLength") {
                 throw new Error(`Expected arrayFixedLength node.`);
             }
             if (node.data.length !== method.length) {
                 throw new Error(`arrayFixedLength expected ` + `${method.length} elements, ` + `received ${node.data.length}.`);
             }
             for (const element of node.data) {
-                writeDataInternal(element, writer, method.element, parentContext, state);
+                writeDataInternal(element, writer, method.element, context, state);
             }
             break;
         }
         case "arrayFieldLength": {
-            if (typeof node !== "object" || node === null || node.type !== "arrayFieldLength") {
+            if (!isComplexNode(node) || node.type !== "arrayFieldLength") {
                 throw new Error(`Expected arrayFieldLength node.`);
             }
             for (const element of node.data) {
-                writeDataInternal(element, writer, method.element, parentContext, state);
+                writeDataInternal(element, writer, method.element, context, state);
             }
-            break;
-        }
-        case "texture": {
-            if (typeof node !== "object" || node === null || node.type !== "texture") {
-                throw new Error(`Expected texture node.`);
-            }
-            writer.writeBytes(node.texturePalette);
-            writer.writeBytes(node.textureData);
-            writer.writeBytes(node.padBytes);
             break;
         }
         case "custom": {
+            if (!isComplexNode(node)) {
+                throw new Error(`Expected custom node.`);
+            }
             method.write(writer, node, parentContext ?? context, state);
             break;
         }
         default:
             return assertNever(method);
     }
+
     context.byteUpper = writer.offset;
     return context;
 }
@@ -644,15 +595,10 @@ function resolveDeferredWrite(item: DeferredWrite, writer: ByteWriter, state: Wr
 
     offsetContext.targetByteUpper = targetEnd;
 
-    /*
-     * Extract deferred offsets created specifically
-     * while writing this target.
-     */
+    // Extract deferred offsets created specifically while writing this target.
     const children = state.deferred.splice(deferredBefore);
 
-    /*
-     * Patch our pointer.
-     */
+    // Patch our pointer
     const offsetValue = targetStart - offsetFromValue;
 
     writer.offset = placeholderOffset;
@@ -661,14 +607,10 @@ function resolveDeferredWrite(item: DeferredWrite, writer: ByteWriter, state: Wr
 
     writer.offset = targetEnd;
 
-    /*
-     * Finish our entire deferred subtree.
-     */
+    // Finish our entire deferred subtree.
     resolveDeferredList(children, writer, state);
 
-    /*
-     * NOW we're actually done.
-     */
+    // NOW we're actually done.
     offsetContext.targetResolved = true;
 }
 

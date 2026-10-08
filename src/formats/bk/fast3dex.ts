@@ -1,7 +1,7 @@
 import { ByteReader } from "../../core/byteReader.js";
 import { ByteWriter } from "../../core/byteWriter.js";
 import { ParseContext, WriteContext } from "../../core/data.js";
-import type { StructuredNode, Method } from "../../core/types.js";
+import type { StructuredNode, Method, BitField, BitFieldData } from "../../core/types.js";
 
 export enum DisplayCommand {
     G_SPNOOP = 0x00,
@@ -95,23 +95,33 @@ type displayListTextureData = {
     unknownBits: number;
     mipmaps: number;
     tile: number;
-    tileEnable: number;
+    textureEnable: number;
     scaleS: number;
     scaleT: number;
 };
 
+const bitFieldsSetTimg = {
+    textureFormat: 3,
+    textureBitSize: 2,
+    unknownBits: 7,
+    width: 12,
+    segment: 32,
+} satisfies BitField;
+
+// type displayListSetTimgData = {
+//     command: "G_SETTIMG";
+//     textureFormat: number;
+//     textureBitSize: number;
+//     unknownBits: number;
+//     unknown: number;
+//     segment: number;
+// };
+
 type displayListSetTimgData = {
     command: "G_SETTIMG";
-    textureFormat: number;
-    textureBitSize: number;
-    unknownBits: number;
-    unknown: number;
-    segment: number;
-};
+} & BitFieldData<typeof bitFieldsSetTimg>;
 
-type BitField = Record<string, number>;
-
-const bitFieldsSetTile: BitField = {
+const bitFieldsSetTile = {
     colorFormat: 3,
     bitCalcPower: 2, // bits per pixel = 4*2^(bitCalcPower)
     padBit: 1,
@@ -126,82 +136,48 @@ const bitFieldsSetTile: BitField = {
     sClampAndMirror: 2,
     sWrapBits: 4,
     sShiftBits: 4,
-};
-
-const bitFieldsSetTileSize: BitField = {
-    sLower: 12,
-    tLower: 12,
-    pad: 4,
-    tile: 4,
-    sWidth: 12,
-    tWidth: 12,
-};
-
-const bitFieldsLoadBlock: BitField = {
-    sLower: 12,
-    tLower: 12,
-    pad: 4,
-    tile: 4,
-    texelCount: 12,
-    dxt: 12,
-};
+} satisfies BitField;
 
 type displayListSetTileData = {
     command: "G_SETTILE";
-    colorFormat: number;
-    bitsPerPixel: number;
-    padBit: number;
-    numberOf64BitValuesPerRow: number;
-    tmemOffset: number;
-    padBits: number;
-    tile: number;
-    palette: number;
-    tClampAndMirror: number;
-    tWrapBits: number;
-    tShiftBits: number;
-    sClampAndMirror: number;
-    sWrapBits: number;
-    sShiftBits: number;
-};
+} & BitFieldData<typeof bitFieldsSetTile>;
+
+const bitFieldsSetTileSize = {
+    sLower: 12,
+    tLower: 12,
+    pad: 4,
+    tile: 4,
+    sUpper: 12,
+    tUpper: 12,
+} satisfies BitField;
 
 type displayListSetTileSizeData = {
     command: "G_SETTILESIZE";
-    sLower: number;
-    tLower: number;
-    pad: number;
-    tile: number;
-    sWidth: number;
-    tWidth: number;
-};
+} & BitFieldData<typeof bitFieldsSetTileSize>;
+
+const bitFieldsLoadBlock = {
+    sLower: 12,
+    tLower: 12,
+    pad: 5,
+    tile: 3,
+    sUpper: 12,
+    dxt: 12,
+} satisfies BitField;
 
 type displayListLoadBlockData = {
     command: "G_LOADBLOCK";
-    sLower: number;
-    tLower: number;
-    pad: number;
-    tile: number;
-    texelCount: number;
-    dxt: number;
-};
+} & BitFieldData<typeof bitFieldsLoadBlock>;
 
-type displayListLoadTLUTData = {
-    command: "G_LOADTLUT";
-    byte0: number;
-    byte1: number;
-    byte2: number;
-    u8: number;
-    tile: number;
-    u16: number;
-    colorCount: number;
-    byte3: number;
-};
-
-const bitFieldsLoadTLUT: BitField = {
+const bitFieldsLoadTLUT = {
     padding0: 29,
     tile: 3,
     colorCount: 12,
     padding1: 12,
-}
+} satisfies BitField;
+
+type displayListLoadTLUTData = {
+    command: "G_LOADTLUT";
+} & BitFieldData<typeof bitFieldsLoadTLUT>;
 
 type displayListDefaultData = {
     command: Exclude<keyof typeof DisplayCommand, "G_MOVEMEM" | "G_VTX" | "G_TRI1" | "G_TRI2" | "G_TEXTURE" | "G_SETTIMG" | "G_SETTILE" | "G_SETTILESIZE" | "G_LOADBLOCK" | "G_LOADTLUT">;
@@ -310,22 +286,11 @@ const displayCommandRead = (reader: ByteReader, parentContext: ParseContext): Di
         }
 
         case "G_SETTIMG": {
-            const u8 = reader.u8();
-            const textureFormat = (u8 & 0b1110_0000) >> 5;
-            const textureBitSize = (u8 & 0b0001_1000) >> 3;
-            const unknownBits = (u8 & 0b0000_0111) >> 0;
-
-            const unknown = reader.u16();
-
-            const segment = reader.u32();
+            const entries = reader.bitField(bitFieldsSetTimg);
 
             return {
                 command,
-                textureFormat,
-                textureBitSize,
-                unknownBits,
-                unknown,
-                segment,
+                ...entries,
             };
         }
 
@@ -337,7 +302,7 @@ const displayCommandRead = (reader: ByteReader, parentContext: ParseContext): Di
             const mipmaps = (u8 & 0b0011_1000) >> 3;
             const tile = u8 & 0b0000_0111;
 
-            const tileEnable = reader.u8();
+            const textureEnable = reader.u8();
 
             const scaleS = reader.u16();
             const scaleT = reader.u16();
@@ -348,7 +313,7 @@ const displayCommandRead = (reader: ByteReader, parentContext: ParseContext): Di
                 unknownBits,
                 mipmaps,
                 tile,
-                tileEnable,
+                textureEnable,
                 scaleS,
                 scaleT,
             };
@@ -356,7 +321,7 @@ const displayCommandRead = (reader: ByteReader, parentContext: ParseContext): Di
 
         case "G_SETTILE": {
             const entries = reader.bitField(bitFieldsSetTile);
-            // @ts-expect-error
+
             return {
                 command,
                 ...entries,
@@ -366,10 +331,9 @@ const displayCommandRead = (reader: ByteReader, parentContext: ParseContext): Di
         case "G_SETTILESIZE": {
             const entries = reader.bitField(bitFieldsSetTileSize);
 
-            entries.sWidth = (entries.sWidth >> 2) + 1;
-            entries.tWidth = (entries.tWidth >> 2) + 1;
+            // entries.sUpper = (entries.sUpper >> 2) + 1;
+            // entries.tUpper = (entries.tUpper >> 2) + 1;
 
-            // @ts-expect-error
             return {
                 command,
                 ...entries,
@@ -378,8 +342,7 @@ const displayCommandRead = (reader: ByteReader, parentContext: ParseContext): Di
 
         case "G_LOADBLOCK": {
             const entries = reader.bitField(bitFieldsLoadBlock);
-            entries.texelCount += 1;
-            // @ts-expect-error
+            // entries.sUpper += 1;
             return {
                 command,
                 ...entries,
@@ -392,7 +355,6 @@ const displayCommandRead = (reader: ByteReader, parentContext: ParseContext): Di
             entries.colorCount /= 4;
             entries.colorCount += 1;
 
-            // @ts-expect-error
             return {
                 command,
                 ...entries,
@@ -475,7 +437,7 @@ const displayCommandWrite = (writer: ByteWriter, node: StructuredNode, parentCon
             const u8 = (command.unknownBits << 6) | (command.mipmaps << 3) | (command.tile << 0);
             writer.u8(u8);
 
-            writer.u8(command.tileEnable);
+            writer.u8(command.textureEnable);
 
             writer.u16(command.scaleS);
             writer.u16(command.scaleT);
@@ -483,29 +445,26 @@ const displayCommandWrite = (writer: ByteWriter, node: StructuredNode, parentCon
         }
 
         case "G_SETTIMG": {
-            writer.u8((command.textureFormat << 5) | (command.textureBitSize << 3) | (command.unknownBits << 0));
-            writer.u16(command.unknown);
-            writer.u32(command.segment);
+            // writer.u8((command.textureFormat << 5) | (command.textureBitSize << 3) | (command.unknownBits << 0));
+            // writer.u16(command.unknown);
+            // writer.u32(command.segment);
+
+            writer.bitField(bitFieldsSetTimg, command);
             break;
         }
 
         case "G_SETTILE": {
-            // @ts-expect-error
             writer.bitField(bitFieldsSetTile, command);
             break;
         }
 
         case "G_SETTILESIZE": {
-            command.sWidth = (command.sWidth - 1) << 2;
-            command.tWidth = (command.tWidth - 1) << 2;
-            // @ts-expect-error
             writer.bitField(bitFieldsSetTileSize, command);
             break;
         }
 
         case "G_LOADBLOCK": {
-            command.texelCount -= 1;
-            // @ts-expect-error
+            // command.sUpper -= 1;
             writer.bitField(bitFieldsLoadBlock, command);
             break;
         }
@@ -513,8 +472,6 @@ const displayCommandWrite = (writer: ByteWriter, node: StructuredNode, parentCon
         case "G_LOADTLUT": {
             command.colorCount -= 1;
             command.colorCount *= 4;
-
-            // @ts-expect-error
             writer.bitField(bitFieldsLoadTLUT, command);
             break;
         }

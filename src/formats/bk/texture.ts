@@ -1,5 +1,5 @@
 import type { Method, StructuredNode } from "../../core/types.js";
-import { TextureTypeEnum } from "../../core/types.js";
+import { ModelTextureTypeEnum } from "../../core/types.js";
 
 import type { ParseContext, WriteContext } from "../../core/data.js";
 import { parseDataInternal, writeDataInternal, WriteState, getNodeAtPath } from "../../core/data.js";
@@ -8,6 +8,7 @@ import { ByteReader } from "../../core/byteReader.js";
 import { ByteWriter } from "../../core/byteWriter.js";
 
 import { R5G5B5A1toR8G8B8A8, R8G8B8A8toR5G5B5A1, I4A4toR8G8B8A8 } from "../../core/color.js";
+import { MethodCustom } from "../../core/types.js";
 
 // export const  methodTextureData: Method = {
 //     type: "texture",
@@ -120,7 +121,7 @@ const headerDataMethod: Method = {
     lengthField: "textureCount",
 };
 
-export const methodTextureDataBlob: Method = {
+export const methodTextureDataBlob: MethodCustom = {
     type: "custom",
     read: (reader: ByteReader, parseContext: ParseContext): StructuredNode => {
         // console.log("Reading texture data at offset: 0x", reader.offset.toString(16));
@@ -129,9 +130,7 @@ export const methodTextureDataBlob: Method = {
         const byteLength = getNodeAtPath("byteLength", parseContext) as number;
         const textureCount = getNodeAtPath("textureCount", parseContext) as number;
 
-        const source: Uint8Array = new Uint8Array(reader.view.buffer);
-
-        const headerData = parseDataInternal(source, reader, headerDataMethod, parseContext, { deferred: [] });
+        const headerData = parseDataInternal(reader, headerDataMethod, parseContext, { deferred: [] });
         // console.log("Parsed header data:", headerData);
 
         const headerDataByteLength = textureCount * 16 + 8;
@@ -168,34 +167,34 @@ export const methodTextureDataBlob: Method = {
 
                     let paletteColorCount: number = 0;
 
-                    let textureType: TextureTypeEnum;
+                    let textureType: ModelTextureTypeEnum;
                     let bytesPalette: number;
                     let bytesImage: number;
                     switch (thisTextureHeader.data.textureType) {
                         case 0x01:
-                            textureType = TextureTypeEnum.CI4;
+                            textureType = ModelTextureTypeEnum.CI4;
                             paletteColorCount = 16;
                             bytesPalette = paletteColorCount * 2;
                             bytesImage = (w * h) / 2;
                             break;
                         case 0x02:
-                            textureType = TextureTypeEnum.CI8;
+                            textureType = ModelTextureTypeEnum.CI8;
                             paletteColorCount = 256;
                             bytesPalette = paletteColorCount * 2;
                             bytesImage = w * h;
                             break;
                         case 0x04:
-                            textureType = TextureTypeEnum.RGBA16;
+                            textureType = ModelTextureTypeEnum.RGBA16;
                             bytesPalette = 0;
                             bytesImage = w * h * 2;
                             break;
                         case 0x08:
-                            textureType = TextureTypeEnum.RGBA32;
+                            textureType = ModelTextureTypeEnum.RGBA32;
                             bytesPalette = 0;
                             bytesImage = w * h * 4;
                             break;
                         case 0x10:
-                            textureType = TextureTypeEnum.IA8;
+                            textureType = ModelTextureTypeEnum.IA8;
                             bytesPalette = 0;
                             bytesImage = w * h;
                             break;
@@ -210,10 +209,10 @@ export const methodTextureDataBlob: Method = {
                     };
 
                     reader.tagOffset("purple", "texture palette");
-                    const texturePalette = parseDataInternal(source, reader, methodTexturePalette, parseContext, { deferred: [] });
+                    const texturePalette = parseDataInternal(reader, methodTexturePalette, parseContext, { deferred: [] });
 
                     reader.tagOffset("orange", "texture data");
-                    const image = source.subarray(reader.offset, reader.offset + bytesImage);
+                    const image: Uint8Array = reader.buffer.slice(reader.offset, reader.offset + bytesImage);
                     reader.offset += bytesImage;
 
                     //
@@ -222,7 +221,7 @@ export const methodTextureDataBlob: Method = {
                     // console.log(`Texture ${i}: foundByteLength = ${foundByteLength}, headerByteLength = ${headerByteLength}`);
 
                     const mipMapLength = foundByteLength - headerByteLength;
-                    const mipMap = source.subarray(reader.offset, reader.offset + mipMapLength);
+                    const mipMap = reader.buffer.slice(reader.offset, reader.offset + mipMapLength);
                     reader.offset += mipMapLength;
 
                     debugAttachTextureToDocument(textureType, texturePalette.data, w, h, image);
@@ -231,7 +230,7 @@ export const methodTextureDataBlob: Method = {
                     }
 
                     textures.push({
-                        textureType: TextureTypeEnum[textureType],
+                        textureType: ModelTextureTypeEnum[textureType],
                         texturePalette: texturePalette,
                         textureData: image,
                         mipMap: mipMap,
@@ -251,7 +250,13 @@ export const methodTextureDataBlob: Method = {
             },
             write: (writer: ByteWriter, node: StructuredNode, writeContext: WriteContext, writeState: WriteState): void => {
                 for (let i = 0; i < node.data.textures.length; i++) {
-                    const texture = node.data.textures[i];
+                    const texture: {
+                        textureType: ModelTextureTypeEnum;
+                        texturePalette: StructuredNode;
+                        textureData: Uint8Array;
+                        mipMap: Uint8Array;
+                        methodTexturePalette: Method;
+                    } = node.data.textures[i];
                     // writer.writeBytes(texture.texturePalette);
                     writeDataInternal(texture.texturePalette, writer, texture.methodTexturePalette, writeContext, writeState);
                     writer.writeBytes(texture.textureData);
@@ -260,7 +265,7 @@ export const methodTextureDataBlob: Method = {
             },
         };
 
-        const textureData = parseDataInternal(source, reader, textureDataMethod, parseContext, { deferred: [] });
+        const textureData = parseDataInternal(reader, textureDataMethod, parseContext, { deferred: [] });
 
         return {
             type: "custom",
@@ -274,7 +279,15 @@ export const methodTextureDataBlob: Method = {
         };
     },
     write: (writer: ByteWriter, node: StructuredNode, writeContext: WriteContext, writeState: WriteState): void => {
+        if (isNaN(writer.offset)) {
+            console.trace();
+            throw new Error(`Invalid writer offset before first writing: ${writer.offset}`);
+        }
         writeDataInternal(node.data.headerData, writer, headerDataMethod, writeContext, writeState);
+        if (isNaN(writer.offset)) {
+            console.trace();
+            throw new Error(`Invalid writer offset before second writing: ${writer.offset}`);
+        }
         writeDataInternal(node.data.textureData, writer, node.data.textureDataMethod, writeContext, writeState);
     },
 };
@@ -293,7 +306,7 @@ function numberColorToCSSColor(color: number) {
     return `rgba(${(color & 0xff000000) >>> 24}, ${(color & 0x00ff0000) >>> 16}, ${(color & 0x0000ff00) >>> 8}, ${((color & 0x000000ff) >>> 0) / 255})`;
 }
 
-function debugAttachTextureToDocument(texType: TextureTypeEnum, palette: number[], w: number, h: number, textureData: Uint8Array): void {
+function debugAttachTextureToDocument(texType: ModelTextureTypeEnum, palette: number[], w: number, h: number, textureData: Uint8Array): void {
     // skip if running in bun and not browser
     if (typeof document === "undefined") {
         return;
@@ -302,8 +315,9 @@ function debugAttachTextureToDocument(texType: TextureTypeEnum, palette: number[
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;
-    canvas.title = `Texture: ${TextureTypeEnum[texType]} (${w}x${h})`;
+    canvas.title = `Texture: ${ModelTextureTypeEnum[texType]} (${w}x${h})`;
     canvas.style.padding = "4px";
+    canvas.style.border = "4px solid " + (texType === ModelTextureTypeEnum.CI4 || texType === ModelTextureTypeEnum.CI8 ? "blue" : "black");
 
     let ctx = canvas.getContext("2d");
     if (ctx === null) {
@@ -311,7 +325,7 @@ function debugAttachTextureToDocument(texType: TextureTypeEnum, palette: number[
     }
 
     switch (texType) {
-        case TextureTypeEnum.CI4: {
+        case ModelTextureTypeEnum.CI4: {
             let lut = [];
             for (let i = 0; i < 16; i++) {
                 lut.push(R5G5B5A1toR8G8B8A8(palette[i]));
@@ -332,7 +346,7 @@ function debugAttachTextureToDocument(texType: TextureTypeEnum, palette: number[
             }
             break;
         }
-        case TextureTypeEnum.CI8: {
+        case ModelTextureTypeEnum.CI8: {
             let lut = [];
             for (let i = 0; i < 256; i++) {
                 lut.push(R5G5B5A1toR8G8B8A8(palette[i]));
@@ -348,7 +362,7 @@ function debugAttachTextureToDocument(texType: TextureTypeEnum, palette: number[
             }
             break;
         }
-        case TextureTypeEnum.RGBA16: {
+        case ModelTextureTypeEnum.RGBA16: {
             for (let y = 0; y < h; y++) {
                 for (let x = 0; x < w; x++) {
                     let color = R5G5B5A1toR8G8B8A8((textureData[(y * w + x) << 1] << 8) | (textureData[((y * w + x) << 1) | 1] << 0));
@@ -358,7 +372,7 @@ function debugAttachTextureToDocument(texType: TextureTypeEnum, palette: number[
             }
             break;
         }
-        case TextureTypeEnum.RGBA32: {
+        case ModelTextureTypeEnum.RGBA32: {
             for (let y = 0; y < h; y++) {
                 for (let x = 0; x < w; x++) {
                     let color = Number(textureData[(y * w + x) << 2] | (textureData[((y * w + x) << 2) | 1] << 8) | (textureData[((y * w + x) << 2) | 2] << 16) | (textureData[((y * w + x) << 2) | 3] << 24));
@@ -368,7 +382,7 @@ function debugAttachTextureToDocument(texType: TextureTypeEnum, palette: number[
             }
             break;
         }
-        case TextureTypeEnum.IA8: {
+        case ModelTextureTypeEnum.IA8: {
             for (let y = 0; y < h; y++) {
                 for (let x = 0; x < w; x++) {
                     let color = I4A4toR8G8B8A8(textureData[y * w + x]);

@@ -1,13 +1,17 @@
-import type { Endian } from "./types.js";
+import type { BitField, BitFieldData, Endian } from "./types.js";
 
 export class ByteReader {
+    readonly buffer: Uint8Array;
+
     private readonly littleEndian: boolean;
-    readonly view: DataView;
+    private readonly view: DataView;
+
     offset: number = 0;
     bytesInBuffer: number = 0;
     debugTaggedOffsets: Record<number, { color: string; text: string }>;
 
     constructor(buffer: Uint8Array, endian: Endian) {
+        this.buffer = buffer;
         this.view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
         this.littleEndian = endian === "little";
         this.bytesInBuffer = buffer.byteLength;
@@ -63,24 +67,39 @@ export class ByteReader {
         return value;
     }
 
-    public bitField(fields: Record<string, number>): Record<string, number> {
-        const entries: Record<string, number> = {};
+    public bitField<T extends BitField>(fields: T): BitFieldData<T> {
+        const entries = {} as BitFieldData<T>;
 
-        let bits = 0;
-        let bitsLoaded = 0;
+        let buffer = 0;
+        let bitsAvailable = 0;
 
-        for (const [field, bitsRequired] of Object.entries(fields)) {
-            while (bitsLoaded < bitsRequired) {
-                bits = (bits << 8) | this.u8();
-                bitsLoaded += 8;
+        for (const [field, width] of Object.entries(fields)) {
+            if (width < 1 || width > 32) {
+                throw new RangeError(`Bit field "${field}" has invalid width: ${width}`);
             }
 
-            bitsLoaded -= bitsRequired;
+            let value = 0;
+            let bitsRemaining = width;
 
-            entries[field] = (bits >>> bitsLoaded) & ((1 << bitsRequired) - 1);
+            while (bitsRemaining > 0) {
+                if (bitsAvailable === 0) {
+                    buffer = this.u8();
+                    bitsAvailable = 8;
+                }
 
-            // Retain only unread bits.
-            bits &= (1 << bitsLoaded) - 1;
+                const take = Math.min(bitsRemaining, bitsAvailable);
+                const shift = bitsAvailable - take;
+                const mask = (1 << take) - 1;
+
+                value = value * 2 ** take + ((buffer >>> shift) & mask);
+
+                bitsAvailable -= take;
+                bitsRemaining -= take;
+
+                buffer &= (1 << bitsAvailable) - 1;
+            }
+
+            entries[field as keyof T] = value;
         }
 
         return entries;
